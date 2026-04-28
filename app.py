@@ -3,8 +3,8 @@ import pandas as pd
 import numpy as np
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Battery Sizer Pro", layout="wide")
-st.title("🔋 Professional Battery Capacity Sizing Tool")
+st.set_page_config(page_title="Battery Capacity Pro", layout="wide")
+st.title("🔋Battery Capacity Calculator")
 
 with st.sidebar:
     st.header("1. System Architecture")
