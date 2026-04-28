@@ -73,4 +73,4 @@ with col1:
         m_cont_i = st.number_input("Module Cont. Discharge (A)", value=15.0, step=0.1)
         m_peak_i = st.number_input("Module Peak Discharge (A)", value=20.0, step=0.1)
     with mc3:
-        m_weight = st.number_input("Module Weight (kg)", value=15
+        m_weight = st.number_input("Module Weight (kg)", value=15)
