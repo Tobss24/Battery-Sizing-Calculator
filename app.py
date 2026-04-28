@@ -3,82 +3,101 @@ import pandas as pd
 import numpy as np
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Battery Capacity Pro", layout="wide")
-st.title("🔋Battery Capacity Calculator")
+st.set_page_config(page_title="Battery Sizer Pro", layout="wide")
+st.title("🔋 Professional Battery Capacity Sizing Tool")
 
 with st.sidebar:
     st.header("1. System Architecture")
-    v_batt = st.number_input("Battery Module Voltage (V)", value=48.0)
-    v_cutoff = st.slider("Voltage Cut-off (%)", 0, 20, 10) / 100
+    # Setting 'value' as float (48.0) and 'step' to 0.1 enables float input
+    v_batt = st.number_input("Battery Module Voltage (V)", value=48.0, step=0.1, format="%.2f")
+    v_cutoff = st.slider("Voltage Cut-off (%)", 0.0, 20.0, 10.0) / 100.0
     
     st.header("2. Efficiency & Safety")
-    eta_dc_dc = st.slider("DC-DC Efficiency (%)", 80, 99, 95) / 100
-    safety_buffer = st.slider("Safety Buffer (%)", 0, 50, 10) / 100
-    max_dod = st.slider("Max Depth of Discharge (%)", 10, 100, 80) / 100
+    eta_dc_dc = st.slider("DC-DC Efficiency (%)", 70.0, 100.0, 95.0) / 100.0
+    safety_buffer = st.slider("Safety Buffer (%)", 0.0, 100.0, 10.0) / 100.0
+    max_dod = st.slider("Max Depth of Discharge (%)", 10.0, 100.0, 80.0) / 100.0
 
     st.header("3. Degradation Settings")
-    # NEW: These now directly impact the math
-    target_retention_cycle = st.slider("Retention after Cycle Life (%)", 50, 100, 80) / 100
-    target_retention_calendar = st.slider("Retention after Calendar Life (%)", 50, 100, 90) / 100
-    temp_deg_per_degree = st.slider("Temp Penalty (% per °C > 25°C)", 0.0, 5.0, 2.0) / 100
+    target_retention_cycle = st.slider("Retention after Cycle Life (%)", 10.0, 100.0, 80.0) / 100.0
+    target_retention_calendar = st.slider("Retention after Calendar Life (%)", 10.0, 100.0, 90.0) / 100.0
+    temp_deg_per_degree = st.number_input("Temp Penalty (% per °C > 25°C)", value=2.0, step=0.1) / 100.0
 
 # --- LOAD PROFILE ---
 col1, col2 = st.columns([2, 1])
 
 with col1:
     st.subheader("Load Schedule")
+    # Using floats in the initial dictionary forces the editor to accept decimals
     load_data = pd.DataFrame([
-        {"Name": "Hotel Load", "Power (W)": 50, "Start Hour": 0, "Duration (h)": 24, "Peak Factor": 1.0},
-        {"Name": "Main Actuator", "Power (W)": 300, "Start Hour": 8, "Duration (h)": 2, "Peak Factor": 2.5},
+        {"Name": "Hotel Load", "Power (W)": 50.5, "Start Hour": 0.0, "Duration (h)": 24.0, "Peak Factor": 1.0},
+        {"Name": "Main Actuator", "Power (W)": 300.75, "Start Hour": 8.5, "Duration (h)": 2.25, "Peak Factor": 2.5},
     ])
-    edited_loads = st.data_editor(load_data, num_rows="dynamic", use_container_width=True)
+    
+    # Configure columns to ensure float precision
+    edited_loads = st.data_editor(
+        load_data, 
+        num_rows="dynamic", 
+        use_container_width=True,
+        column_config={
+            "Power (W)": st.column_config.NumberColumn(format="%.2f"),
+            "Start Hour": st.column_config.NumberColumn(min_value=0, max_value=24, format="%.2f"),
+            "Duration (h)": st.column_config.NumberColumn(format="%.2f"),
+            "Peak Factor": st.column_config.NumberColumn(format="%.2f"),
+        }
+    )
 
-    # Graphing
-    time_steps = np.arange(0, 24, 0.5)
+    # Graphing logic with high-resolution time steps
+    time_steps = np.arange(0, 24, 0.25) # 15-minute intervals
     power_timeline = np.zeros(len(time_steps))
     for _, row in edited_loads.iterrows():
         for i, t in enumerate(time_steps):
-            if row['Start Hour'] <= t < (row['Start Hour'] + row['Duration (h)']):
-                power_timeline[i] += row['Power (W)']
+            if float(row['Start Hour']) <= t < (float(row['Start Hour']) + float(row['Duration (h)'])):
+                power_timeline[i] += float(row['Power (W)'])
     
     st.area_chart(pd.DataFrame({"Hour": time_steps, "Power Draw (W)": power_timeline}), x="Hour", y="Power Draw (W)")
 
     st.subheader("Environmental Factors")
-    op_temp = st.number_input("Operating Temperature (°C)", value=25)
+    op_temp = st.number_input("Operating Temperature (°C)", value=25.0, step=0.5)
 
 # --- THE CALCULATOR ENGINE ---
-# 1. Total Energy Required (Wh)
-total_wh_needed = 0
-max_peak_w = 0
-for _, row in edited_loads.iterrows():
-    total_wh_needed += (row['Power (W)'] * row['Duration (h)']) / eta_dc_dc
-    if (row['Power (W)'] * row['Peak Factor']) > max_peak_w:
-        max_peak_w = row['Power (W)'] * row['Peak Factor']
+total_wh_needed = 0.0
+max_peak_w = 0.0
 
-# 2. Compound Degradation Logic
+for _, row in edited_loads.iterrows():
+    # Calculation using float cast to be safe
+    p = float(row['Power (W)'])
+    d = float(row['Duration (h)'])
+    pf = float(row['Peak Factor'])
+    
+    total_wh_needed += (p * d) / eta_dc_dc
+    if (p * pf) > max_peak_w:
+        max_peak_w = p * pf
+
 # Temperature Penalty: only applies if temp > 25C
 temp_penalty = 1.0
-if op_temp > 25:
-    temp_penalty = 1.0 - ((op_temp - 25) * temp_deg_per_degree)
+if op_temp > 25.0:
+    temp_penalty = 1.0 - ((op_temp - 25.0) * temp_deg_per_degree)
 
-# Total Health Multiplier (SOH at End of Life)
-total_soh_multiplier = temp_penalty * target_retention_cycle * target_retention_calendar
+# Compound SOH
+total_soh_multiplier = float(temp_penalty * target_retention_cycle * target_retention_calendar)
 
-# 3. Final Sizing
-# We divide by SOH because as SOH drops, we need a bigger BOL battery to meet the same EOL need.
-required_usable_wh = total_wh_needed * (1 + safety_buffer)
+# Sizing Math
+required_usable_wh = total_wh_needed * (1.0 + safety_buffer)
 required_nameplate_wh = required_usable_wh / (max_dod * total_soh_multiplier)
 required_ah = required_nameplate_wh / v_batt
 
 with col2:
     st.subheader("Sizing Results (BOL)")
-    st.metric("Total Capacity (Ah)", f"{required_ah:.2f} Ah")
-    st.metric("Total Energy (kWh)", f"{(required_nameplate_wh/1000):.2f} kWh")
+    st.metric("Total Capacity (Ah)", f"{required_ah:.3f} Ah")
+    st.metric("Total Energy (kWh)", f"{(required_nameplate_wh/1000.0):.4f} kWh")
     
     st.divider()
-    st.write(f"**Calculated EOL State of Health:** {total_soh_multiplier*100:.1f}%")
-    st.caption("This is the 'remaining' capacity factor after temp, cycles, and years.")
+    st.write(f"**Calculated EOL State of Health:** {total_soh_multiplier*100.0:.2f}%")
     
     st.divider()
-    peak_current = max_peak_w / (v_batt * (1 - v_cutoff))
+    # Physics check: Low voltage = High current
+    peak_current = max_peak_w / (v_batt * (1.0 - v_cutoff))
     st.write(f"Worst-case Peak: **{peak_current:.2f} A**")
+    
+    c_rating_req = peak_current / required_ah if required_ah > 0 else 0
+    st.write(f"Min. Discharge C-Rating: **{c_rating_req:.2f}C**")
