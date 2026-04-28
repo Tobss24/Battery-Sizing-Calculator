@@ -108,3 +108,36 @@ with col2:
     st.write(f"**EOL State of Health:** {total_soh_multiplier*100.0:.1f}%")
     peak_current = max_peak_w / (v_batt * (1.0 - v_cutoff))
     st.write(f"Worst-case Discharge: **{peak_current:.2f} A**")
+# --- MODULE SPECIFICATION INPUTS ---
+st.header("5. Module Specifications (COTS)")
+m_volt = st.number_input("Module Nominal Voltage (V)", value=12.0)
+m_cap = st.number_input("Module Capacity (Ah)", value=100.0)
+m_cont_i = st.number_input("Module Max Cont. Discharge (A)", value=50.0)
+m_peak_i = st.number_input("Module Max Peak Discharge (A)", value=100.0)
+m_weight = st.number_input("Module Weight (kg)", value=10.0)
+
+# --- CONFIGURATION ENGINE ---
+# 1. Calculate Series
+n_series = int(np.ceil(v_batt / m_volt))
+achieved_v = n_series * m_volt
+
+# 2. Calculate Parallel (based on Ah)
+n_parallel = int(np.ceil(required_ah / m_cap))
+
+# 3. Verify against Peak Current
+system_peak_limit = n_parallel * m_peak_i
+while system_peak_limit < peak_current:
+    n_parallel += 1
+    system_peak_limit = n_parallel * m_peak_i
+
+total_modules = n_series * n_parallel
+total_pack_weight = total_modules * m_weight
+
+# --- DISPLAY CONFIG ---
+st.subheader("Pack Configuration")
+col_a, col_b, col_c = st.columns(3)
+col_a.metric("Configuration", f"{n_series}S {n_parallel}P")
+col_b.metric("Total Modules", f"{total_modules}")
+col_c.metric("Pack Weight", f"{total_pack_weight:.1f} kg")
+
+st.write(f"This configuration provides **{achieved_v:.1f}V** nominal.")
