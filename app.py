@@ -17,9 +17,11 @@ with st.sidebar:
     max_dod = st.slider("Max Depth of Discharge (%)", 10.0, 100.0, 80.0) / 100.0
 
     st.header("3. Charging Parameters")
-    # NEW: Charge-specific inputs
     max_charge_p = st.number_input("Max Charge Power (W)", value=500.0, step=10.0)
     eta_charge = st.slider("Charge Efficiency (%)", 70.0, 99.0, 90.0) / 100.0
+    # NEW: Taper Logic
+    taper_start_pct = st.slider("Taper Phase Starts at (%)", 50, 95, 80) / 100.0
+    taper_multiplier = st.number_input("Taper Time Multiplier", value=1.5, step=0.1)
     max_charge_c_rate = st.number_input("Max Allowable Charge C-Rate", value=0.5, step=0.1)
 
     st.header("4. Degradation Settings")
@@ -36,7 +38,6 @@ with col1:
         {"Name": "Hotel Load", "Power (W)": 50.0, "Start Hour": 0.0, "Duration (h)": 24.0, "Peak Factor": 1.0},
         {"Name": "Main Actuator", "Power (W)": 300.0, "Start Hour": 8.0, "Duration (h)": 2.0, "Peak Factor": 2.5},
     ])
-    
     edited_loads = st.data_editor(load_data, num_rows="dynamic", use_container_width=True)
 
     # Power vs Time Graph
@@ -55,12 +56,9 @@ total_wh_discharged = 0.0
 max_peak_w = 0.0
 
 for _, row in edited_loads.iterrows():
-    p = float(row['Power (W)'])
-    d = float(row['Duration (h)'])
-    pf = float(row['Peak Factor'])
-    total_wh_discharged += (p * d) / eta_dc_dc
-    if (p * pf) > max_peak_w:
-        max_peak_w = p * pf
+    total_wh_discharged += (float(row['Power (W)']) * float(row['Duration (h)'])) / eta_dc_dc
+    if (float(row['Power (W)']) * float(row['Peak Factor'])) > max_peak_w:
+        max_peak_w = float(row['Power (W)']) * float(row['Peak Factor'])
 
 # SOH Logic
 temp_penalty = 1.0 - ((op_temp - 25.0) * temp_deg_per_degree) if op_temp > 25.0 else 1.0
@@ -71,10 +69,19 @@ required_usable_wh = total_wh_discharged * (1.0 + safety_buffer)
 required_nameplate_wh = required_usable_wh / (max_dod * total_soh_multiplier)
 required_ah = required_nameplate_wh / v_batt
 
-# NEW: Charge Time Math
-# We need to replenish the energy we took out, accounting for efficiency
+# NEW: Refined Charge Time Math
 energy_to_replenish_wh = required_usable_wh / eta_charge
-charge_time_hours = energy_to_replenish_wh / max_charge_p if max_charge_p > 0 else 0
+
+# Phase 1: Bulk (Constant Power)
+bulk_energy_wh = energy_to_replenish_wh * taper_start_pct
+t_bulk = bulk_energy_wh / max_charge_p if max_charge_p > 0 else 0
+
+# Phase 2: Taper (Slowing down)
+taper_energy_wh = energy_to_replenish_wh * (1.0 - taper_start_pct)
+# We apply the multiplier to the theoretical time for the remaining energy
+t_taper = (taper_energy_wh / max_charge_p) * taper_multiplier if max_charge_p > 0 else 0
+
+total_charge_time = t_bulk + t_taper
 
 with col2:
     st.subheader("Sizing Results (BOL)")
@@ -83,16 +90,19 @@ with col2:
     
     st.divider()
     st.subheader("Charging Analysis")
-    st.metric("Estimated Charge Time", f"{charge_time_hours:.2f} hrs")
+    st.metric("Total Charge Time", f"{total_charge_time:.2f} hrs")
     
-    # C-Rate Safety Check
+    c1, c2 = st.columns(2)
+    c1.caption(f"Bulk: {t_bulk:.2f}h")
+    c2.caption(f"Taper: {t_taper:.2f}h")
+    
     actual_charge_c_rate = (max_charge_p / v_batt) / required_ah if required_ah > 0 else 0
     st.write(f"Actual Charge C-Rate: **{actual_charge_c_rate:.3f} C**")
     
     if actual_charge_c_rate > max_charge_c_rate:
-        st.error(f"⚠️ Warning: Charge C-rate exceeds your limit of {max_charge_c_rate}C!")
+        st.error(f"⚠️ Warning: Charge C-rate exceeds limit!")
     else:
-        st.success("✅ Charge C-rate is within safe limits.")
+        st.success("✅ Charge C-rate safe.")
 
     st.divider()
     st.write(f"**EOL State of Health:** {total_soh_multiplier*100.0:.1f}%")
